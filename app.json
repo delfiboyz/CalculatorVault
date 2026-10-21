@@ -2,14 +2,9 @@
   "expo": {
     "name": "calculator",
     "slug": "calculator",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
-    },
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
@@ -24,34 +19,48 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png"
-      }
+      },
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#000000",
+          "imageWidth": 200
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos.",
           "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos to your library.",
-          "isGalleryManaged": true
+          "granularPermissions": [
+            "photo",
+            "video"
+          ]
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "The app accesses your photos to let you hide them in the vault."
+          "photosPermission": "The app accesses your photos to let you hide them in the vault.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       [
-        "expo-build-properties",
+        "expo-local-authentication",
         {
-          "android": {
-            "kotlinVersion": "1.9.24"
-          }
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to use Face ID to unlock the vault."
         }
-      ]
+      ],
+      "expo-video"
     ],
     "extra": {
       "eas": {

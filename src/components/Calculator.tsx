@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Dimensions } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface CalculatorProps {
   onUnlock: (pin: string) => void;
+  // Triggered by long-pressing "=", when biometric unlock is enabled.
+  onBiometricUnlock: () => void;
 }
 
-const { width } = Dimensions.get('window');
-const BUTTON_WIDTH = width / 4;
-
-const Calculator: React.FC<CalculatorProps> = ({ onUnlock }) => {
+const Calculator: React.FC<CalculatorProps> = ({ onUnlock, onBiometricUnlock }) => {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const size = Math.min(width, 500) / 4 - 20;
   const [display, setDisplay] = useState('0');
   const [previousValue, setPreviousValue] = useState<number | null>(null);
   const [operator, setOperator] = useState<string | null>(null);
@@ -52,10 +55,11 @@ const Calculator: React.FC<CalculatorProps> = ({ onUnlock }) => {
       setOperator(value);
       setWaitingForNewValue(true);
     } else if (value === '=') {
-      // Secret unlock check
-      onUnlock(display);
-
-      if (operator && previousValue !== null) {
+      if (!operator && /^\d+$/.test(display)) {
+        // "=" on a bare number does nothing in a calculator, so only that is treated
+        // as an unlock attempt. Normal calculations never count as failed PIN attempts.
+        onUnlock(display);
+      } else if (operator && previousValue !== null) {
         const current = parseFloat(display);
         const result = calculate(previousValue, current, operator);
         setDisplay(String(Number(result.toFixed(8))));
@@ -90,7 +94,7 @@ const Calculator: React.FC<CalculatorProps> = ({ onUnlock }) => {
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       <View style={styles.displayContainer}>
         <Text style={styles.displayText} numberOfLines={1} adjustsFontSizeToFit>
           {display}
@@ -104,11 +108,13 @@ const Calculator: React.FC<CalculatorProps> = ({ onUnlock }) => {
                 key={button}
                 style={[
                   styles.button,
-                  button === '0' && styles.zeroButton,
+                  { width: size, height: size, borderRadius: size / 2 },
+                  button === '0' && [styles.zeroButton, { width: size * 2 + 20 }],
                   ['÷', '×', '-', '+', '='].includes(button) && styles.operatorButton,
                   ['AC', '+/-', '%'].includes(button) && styles.specialButton
                 ]}
                 onPress={() => handlePress(button)}
+                onLongPress={button === '=' ? onBiometricUnlock : undefined}
               >
                 <Text style={[
                   styles.buttonText,
@@ -149,15 +155,11 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   button: {
-    width: BUTTON_WIDTH - 20,
-    height: BUTTON_WIDTH - 20,
-    borderRadius: (BUTTON_WIDTH - 20) / 2,
     backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
   zeroButton: {
-    width: (BUTTON_WIDTH * 2) - 20,
     alignItems: 'flex-start',
     paddingLeft: 30,
   },

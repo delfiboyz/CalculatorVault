@@ -1,43 +1,42 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ActivityIndicator, Alert } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, View, ActivityIndicator, Text, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as ScreenCapture from 'expo-screen-capture';
 import Calculator from './src/components/Calculator';
 import Vault from './src/components/Vault';
 import Setup from './src/components/Setup';
-import { initializeVault, getPin, verifyPin } from './src/utils/storage';
+import Settings from './src/components/Settings';
+import { initializeVault, lockVault, openVault } from './src/utils/storage';
+import { getLockedUntil, hasPin, resetFailedAttempts, verifyPin } from './src/security/pin';
+import { isSecureStoreAvailable } from './src/security/secureStore';
+import { authenticateWithBiometrics } from './src/security/biometrics';
+import { DEFAULT_SETTINGS, SecuritySettings, getSettings, saveSettings } from './src/security/settings';
+import { useAutoLock } from './src/hooks/useAutoLock';
 
-import * as SecureStore from 'expo-secure-store';
+type Screen = 'calculator' | 'vault' | 'settings';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
   const [isSetup, setIsSetup] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
+  const [screen, setScreen] = useState<Screen>('calculator');
+  const [settings, setSettings] = useState<SecuritySettings>(DEFAULT_SETTINGS);
+  const unlocked = screen !== 'calculator';
 
   useEffect(() => {
-    // Small delay to ensure native modules are definitely ready
-    const timer = setTimeout(() => {
-      checkInitialState();
-    }, 500);
-    return () => clearTimeout(timer);
+    checkInitialState();
   }, []);
 
   const checkInitialState = async () => {
     try {
-      console.log('Checking SecureStore availability...');
-      const isAvailable = await SecureStore.isAvailableAsync();
-      if (!isAvailable) {
-        console.error('SecureStore is not available on this device/environment');
-        setLoading(false);
+      if (!(await isSecureStoreAvailable())) {
+        setUnavailable(true);
         return;
       }
-
-      console.log('Initializing vault...');
-      await initializeVault();
-      
-      console.log('Vault initialized. Fetching PIN...');
-      const pin = await getPin();
-      console.log('PIN fetched:', pin ? 'Exists' : 'Not set');
-      setIsSetup(!!pin);
+      initializeVault();
+      setIsSetup(await hasPin());
+      setSettings(await getSettings());
     } catch (error) {
       console.error('Failed to initialize app:', error);
     } finally {
@@ -45,39 +44,104 @@ export default function App() {
     }
   };
 
-  const handleUnlock = async (inputPin: string) => {
-    const isValid = await verifyPin(inputPin);
-    if (isValid) {
-      setIsLocked(false);
+  const lock = useCallback(() => {
+    lockVault();
+    setScreen('calculator');
+  }, []);
+
+  const enterVault = async () => {
+    try {
+      await openVault();
+      setScreen('vault');
+    } catch (error) {
+      console.error('Failed to open vault:', error);
+      lockVault();
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#f1a33c" />
-      </View>
-    );
-  }
+  const handleUnlock = async (inputPin: string) => {
+    const result = await verifyPin(inputPin);
+    // Failures stay silent so the calculator never reveals that it is a vault.
+    if (result.ok) await enterVault();
+  };
 
-  if (!isSetup) {
-    return (
-      <View style={styles.container}>
-        <Setup onComplete={() => setIsSetup(true)} />
-        <StatusBar style="light" />
-      </View>
-    );
-  }
+  const handleBiometricUnlock = async () => {
+    if (!settings.biometricUnlock || (await getLockedUntil())) return;
+    if (await authenticateWithBiometrics('Unlock')) {
+      await resetFailedAttempts();
+      await enterVault();
+    }
+  };
+
+  const handleSettingsChange = async (next: SecuritySettings) => {
+    setSettings(next);
+    await saveSettings(next);
+  };
+
+  const onActivity = useAutoLock(unlocked, settings.autoLockSeconds, lock);
+
+  // While the vault is open: block screenshots/recording (Android FLAG_SECURE also
+  // blanks the recent-apps preview) and blur the iOS app-switcher snapshot.
+  useEffect(() => {
+    if (!unlocked) return;
+    if (settings.blockScreenCapture) {
+      ScreenCapture.preventScreenCaptureAsync('vault').catch(() => {});
+    }
+    if (Platform.OS === 'ios') {
+      ScreenCapture.enableAppSwitcherProtectionAsync(1).catch(() => {});
+    }
+    return () => {
+      ScreenCapture.allowScreenCaptureAsync('vault').catch(() => {});
+      if (Platform.OS === 'ios') {
+        ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => {});
+      }
+    };
+  }, [unlocked, settings.blockScreenCapture]);
+
+  const renderContent = () => {
+    if (loading) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#f1a33c" />
+        </View>
+      );
+    }
+    if (unavailable) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>Secure storage is not available on this device.</Text>
+        </View>
+      );
+    }
+    if (!isSetup) {
+      return <Setup onComplete={() => setIsSetup(true)} />;
+    }
+    switch (screen) {
+      case 'calculator':
+        return <Calculator onUnlock={handleUnlock} onBiometricUnlock={handleBiometricUnlock} />;
+      case 'vault':
+        return (
+          <Vault onLock={lock} onOpenSettings={() => setScreen('settings')} onActivity={onActivity} />
+        );
+      case 'settings':
+        return (
+          <Settings
+            settings={settings}
+            onChange={handleSettingsChange}
+            onBack={() => setScreen('vault')}
+            onErased={lock}
+          />
+        );
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      {isLocked ? (
-        <Calculator onUnlock={handleUnlock} />
-      ) : (
-        <Vault onLock={() => setIsLocked(true)} />
-      )}
-      <StatusBar style="light" />
-    </View>
+    <SafeAreaProvider>
+      <View style={styles.container} onTouchStart={onActivity}>
+        {renderContent()}
+        <StatusBar style="light" />
+      </View>
+    </SafeAreaProvider>
   );
 }
 
@@ -91,5 +155,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 30,
+  },
+  errorText: {
+    color: '#888',
+    textAlign: 'center',
   },
 });
