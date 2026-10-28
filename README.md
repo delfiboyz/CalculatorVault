@@ -7,7 +7,9 @@ A secure, privacy-focused mobile application that disguises a secret vault as a 
 - **Calculator Disguise**: Fully functional calculator that appears normal on the home screen
 - **Secret Vault**: PIN-protected storage for sensitive files
 - **Multi-Category Support**: Organize files into Photos, Videos, and Documents
-- **Secure Storage**: Uses device secure storage (`expo-secure-store`) to safely store sensitive data
+- **Encrypted Storage**: Every file is encrypted with AES-256-GCM before it is written to disk
+- **Biometric Unlock**: Optional fingerprint / Face ID unlock
+- **Auto-Lock**: Locks when the app is backgrounded and after a configurable idle time
 - **File Management**: 
   - Add files to vault
   - Preview files in fullscreen
@@ -20,9 +22,10 @@ A secure, privacy-focused mobile application that disguises a secret vault as a 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-- Expo CLI: `npm install -g expo-cli`
+- Node.js 20.19 or newer
+- npm
+- A development build (the app uses native modules that are not available in Expo Go):
+  `npx expo run:android` / `npx expo run:ios`, or `eas build --profile development`
 
 ### Installation
 
@@ -58,7 +61,13 @@ npm start
 ### Using the Calculator
 - The main screen displays a fully functional calculator
 - Use it normally for actual calculations
-- **To unlock the vault**: Enter your PIN and press the `=` button
+- **To unlock the vault**: Press `AC`, enter your PIN and press the `=` button
+- **Biometric unlock** (if enabled in settings): Long-press the `=` button
+- Wrong PINs give no visible feedback, so the calculator never reveals that it is a vault.
+  After 5 wrong PINs the vault refuses all unlocks for 30 seconds, doubling with every further
+  failure (up to 1 hour), even if the correct PIN is entered.
+- Only `=` pressed on a plain number counts as an unlock attempt; normal calculations
+  (e.g. `12 + 3 =`) are never counted as failed attempts.
 
 ### Managing Your Vault
 Once unlocked:
@@ -69,28 +78,36 @@ Once unlocked:
 - **Share**: Tap the share icon to send the file
 - **Delete**: Tap the trash icon to permanently remove files
 - **Export All**: Tap the export icon to share or download all files
+- **Lock**: Tap the lock icon to lock the vault immediately
+- **Security Settings** (gear icon): biometric unlock, auto-lock timeout, screenshot blocking,
+  change PIN, view failed unlock attempts, and erase the vault
 
 ## 🛠️ Tech Stack
 
-- **Framework**: React Native with TypeScript
-- **Build Tool**: Expo
-- **Security**: expo-secure-store
-- **UI Components**: Lucide React Native icons
-- **Storage**: File System and Media Library APIs
-- **Video Support**: expo-av
+- **Framework**: React Native 0.86 (New Architecture) + React 19, TypeScript
+- **Build Tool**: Expo SDK 57
+- **Encryption**: `expo-crypto` (native AES-256-GCM), `@noble/hashes` (PBKDF2-SHA256)
+- **Secrets**: `expo-secure-store` (iOS Keychain / Android Keystore)
+- **Authentication**: `expo-local-authentication`
+- **Privacy**: `expo-screen-capture`
+- **Storage**: `expo-file-system` (new `File` / `Directory` API) and `expo-media-library`
+- **Media**: `expo-image`, `expo-video`
+- **UI**: Lucide React Native icons, `react-native-safe-area-context`
 
 ## 📦 Key Dependencies
 
 ```json
 {
-  "expo": "~51.0.0",
-  "react": "18.2.0",
-  "react-native": "0.74.5",
-  "expo-secure-store": "~13.0.0",
-  "expo-file-system": "~17.0.1",
-  "expo-image-picker": "~15.1.0",
-  "expo-document-picker": "~12.0.2",
-  "lucide-react-native": "^1.16.0"
+  "expo": "~57.0.31",
+  "react": "19.2.3",
+  "react-native": "0.86.3",
+  "expo-crypto": "~57.0.4",
+  "expo-secure-store": "~57.0.4",
+  "expo-local-authentication": "~57.0.3",
+  "expo-screen-capture": "~57.0.4",
+  "expo-file-system": "~57.0.7",
+  "expo-video": "~57.0.5",
+  "@noble/hashes": "^2.4.0"
 }
 ```
 
@@ -102,9 +119,20 @@ CalculatorVault/
 │   ├── components/
 │   │   ├── Calculator.tsx    # Calculator UI and logic
 │   │   ├── Vault.tsx         # Vault interface and file management
+│   │   ├── Settings.tsx      # Security settings
 │   │   └── Setup.tsx         # Initial PIN setup
+│   ├── hooks/
+│   │   └── useAutoLock.ts    # Background / idle auto-lock
+│   ├── security/
+│   │   ├── crypto.ts         # AES-256-GCM key management and file encryption
+│   │   ├── pin.ts            # PIN hashing, lockout and failed-attempt log
+│   │   ├── biometrics.ts     # Fingerprint / Face ID
+│   │   ├── settings.ts       # Security settings storage
+│   │   ├── secureStore.ts    # Keychain / Keystore wrapper
+│   │   ├── externalActivity.ts # Pauses auto-lock while pickers/share sheets are open
+│   │   └── encoding.ts       # Byte helpers
 │   └── utils/
-│       └── storage.ts        # Secure storage and file management
+│       └── storage.ts        # Encrypted vault storage
 ├── App.tsx                   # Main app component
 ├── app.json                  # Expo configuration
 ├── package.json              # Dependencies
@@ -113,16 +141,33 @@ CalculatorVault/
 
 ## 🔒 Security Features
 
-- **Device-Level Security**: Uses device's native secure storage
-- **PIN Protection**: 4+ digit PIN required to access vault
-- **Encrypted Storage**: Sensitive data stored securely
-- **File Isolation**: Vault files separated from device gallery
-- **No Cloud Storage**: All files stay on device
+- **Encryption at rest**: Files are encrypted with AES-256-GCM in 1 MB authenticated chunks
+  (large videos never need to fit in memory). File names, types and categories are stored only
+  in an encrypted index; on disk the vault is just random IDs.
+- **Hardware-backed key**: The random 256-bit master key lives in the iOS Keychain / Android
+  Keystore, readable only while the device is unlocked and never included in backups.
+- **Hashed PIN**: The PIN is stored as a salted PBKDF2-SHA256 hash (30,000 iterations) and
+  compared in constant time, never in plain text.
+- **Brute-force protection**: Exponential lockout after 5 wrong PINs, persisted across restarts.
+- **Failed-attempt log**: Settings shows when wrong PINs were entered.
+- **Biometric unlock**: Optional; device-passcode fallback is disabled so the phone's passcode
+  cannot open the vault.
+- **Auto-lock**: Locks immediately when the app is backgrounded and after an idle timeout.
+- **Screenshot & recording blocking**: Enabled while the vault is open; the Android recent-apps
+  preview is blanked and the iOS app-switcher snapshot is blurred.
+- **No plain-text leftovers**: Decrypted copies used for viewing are deleted on every lock and
+  app start; the picker's temporary copies are deleted after import; decrypted images are never
+  written to the image cache.
+- **No backups**: Android `allowBackup` is disabled so the vault cannot be pulled via backups.
+- **Erase vault**: Destroys all files and the encryption key.
+- **Upgrade from v1**: Existing unencrypted files and the plain-text PIN are migrated
+  automatically (encrypted / hashed) on the first unlock.
 
 ## ⚙️ Available Scripts
 
 ```bash
 npm start      # Start development server
+npm run typecheck # Type-check the project
 npm run android # Build and run on Android
 npm run ios    # Build and run on iOS
 npm run web    # Run on web browser
@@ -131,11 +176,10 @@ npm run web    # Run on web browser
 ## 🎨 Customization
 
 ### Change PIN Length
-Edit `src/components/Setup.tsx`:
+Edit `src/security/pin.ts`:
 ```typescript
-if (pin.length < 4) {  // Change 4 to desired minimum
-  Alert.alert('Error', 'PIN must be at least 4 digits');
-}
+export const PIN_MIN_LENGTH = 4;
+export const PIN_MAX_LENGTH = 8;
 ```
 
 ### Add More Categories

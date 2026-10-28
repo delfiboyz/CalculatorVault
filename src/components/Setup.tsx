@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { ShieldCheck } from 'lucide-react-native';
-import { setPin } from '../utils/storage';
+import { PIN_MAX_LENGTH, PIN_MIN_LENGTH, isValidPinFormat, setPin } from '../security/pin';
 
 interface SetupProps {
   onComplete: () => void;
@@ -10,10 +10,15 @@ interface SetupProps {
 const Setup: React.FC<SetupProps> = ({ onComplete }) => {
   const [pin, setInputPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (pin.length < 4) {
-      Alert.alert('Error', 'PIN must be at least 4 digits');
+    if (!isValidPinFormat(pin)) {
+      Alert.alert('Error', `PIN must be ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} digits`);
+      return;
+    }
+    if (/^(\d)\1+$/.test(pin) || '0123456789'.includes(pin) || '9876543210'.includes(pin)) {
+      Alert.alert('Weak PIN', 'Avoid repeated or sequential digits like 1111 or 1234.');
       return;
     }
     if (pin !== confirmPin) {
@@ -21,8 +26,22 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
       return;
     }
 
-    await setPin(pin);
-    Alert.alert('Success', 'Vault setup complete!', [{ text: 'OK', onPress: onComplete }]);
+    setSaving(true);
+    try {
+      await setPin(pin);
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Could not save the PIN.');
+      return;
+    } finally {
+      setSaving(false);
+    }
+    Alert.alert(
+      'Vault ready',
+      'To open the vault, type your PIN on the calculator and press "=". ' +
+        'You can enable fingerprint/Face ID later in the vault settings.',
+      [{ text: 'OK', onPress: onComplete }],
+    );
   };
 
   return (
@@ -34,11 +53,12 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
-          placeholder="Enter 4-digit PIN"
+          placeholder={`Enter ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} digit PIN`}
           placeholderTextColor="#666"
           keyboardType="numeric"
           secureTextEntry
-          maxLength={8}
+          autoComplete="off"
+          maxLength={PIN_MAX_LENGTH}
           value={pin}
           onChangeText={setInputPin}
         />
@@ -48,14 +68,19 @@ const Setup: React.FC<SetupProps> = ({ onComplete }) => {
           placeholderTextColor="#666"
           keyboardType="numeric"
           secureTextEntry
-          maxLength={8}
+          autoComplete="off"
+          maxLength={PIN_MAX_LENGTH}
           value={confirmPin}
           onChangeText={setConfirmPin}
         />
       </View>
 
-      <TouchableOpacity style={styles.button} onPress={handleSave}>
-        <Text style={styles.buttonText}>Initialize Vault</Text>
+      <TouchableOpacity style={styles.button} onPress={handleSave} disabled={saving}>
+        {saving ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Initialize Vault</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
