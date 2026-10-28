@@ -84,8 +84,8 @@ Once unlocked:
 
 ## 🛠️ Tech Stack
 
-- **Framework**: React Native 0.85 (New Architecture) + React 19, TypeScript
-- **Build Tool**: Expo SDK 56
+- **Framework**: React Native 0.86 (New Architecture) + React 19, TypeScript
+- **Build Tool**: Expo SDK 57
 - **Encryption**: `expo-crypto` (native AES-256-GCM), `@noble/hashes` (PBKDF2-SHA256)
 - **Secrets**: `expo-secure-store` (iOS Keychain / Android Keystore)
 - **Authentication**: `expo-local-authentication`
@@ -98,15 +98,15 @@ Once unlocked:
 
 ```json
 {
-  "expo": "~56.0.24",
+  "expo": "~57.0.31",
   "react": "19.2.3",
-  "react-native": "0.85.3",
-  "expo-crypto": "~56.0.5",
-  "expo-secure-store": "~56.0.4",
-  "expo-local-authentication": "~56.0.5",
-  "expo-screen-capture": "~56.0.5",
-  "expo-file-system": "~56.0.11",
-  "expo-video": "~56.1.4",
+  "react-native": "0.86.3",
+  "expo-crypto": "~57.0.4",
+  "expo-secure-store": "~57.0.4",
+  "expo-local-authentication": "~57.0.3",
+  "expo-screen-capture": "~57.0.4",
+  "expo-file-system": "~57.0.7",
+  "expo-video": "~57.0.5",
   "@noble/hashes": "^2.4.0"
 }
 ```
